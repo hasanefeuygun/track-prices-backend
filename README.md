@@ -1,98 +1,293 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Track Prices Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Track Prices Backend is the API and orchestration layer for the broader Track Prices system. It accepts product search requests from the UI, creates scrape jobs in Supabase, and exposes job/result endpoints that the UI can poll while the scraper worker runs in the background.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This repository does not perform scraping directly. Scraping is delegated to a separate worker service through the `scrape_jobs` table. The backend is responsible for validation, API boundaries, and database coordination.
 
-## Description
+## Role In The Track Prices System
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+```text
+Track Prices UI
+      |
+      | creates search request
+      v
+Track Prices Backend
+      |
+      | inserts pending scrape job
+      v
+Supabase scrape_jobs
+      |
+      | consumed by scraper worker
+      v
+Track Prices Scraper
+      |
+      | writes normalized results
+      v
+Supabase scrape_results
+      |
+      | read through backend endpoints
+      v
+Track Prices UI
 ```
 
-## Compile and run the project
+The backend keeps the user-facing app decoupled from scraper execution. This makes the system easier to scale, retry, monitor, and extend with additional marketplace adapters.
 
-```bash
-# development
-$ npm run start
+## Project Purpose
 
-# watch mode
-$ npm run start:dev
+This project is built for educational and portfolio purposes. It demonstrates a clean API layer for an asynchronous scraping pipeline using NestJS and Supabase.
 
-# production mode
-$ npm run start:prod
+It shows:
+
+- NestJS module organization
+- Request validation with DTOs
+- Supabase service abstraction
+- Job creation through `scrape_jobs`
+- Result reads through `scrape_results`
+- UUID validation for job routes
+- A backend API that coordinates with a separate scraper worker
+
+## Responsible Use
+
+This backend is part of an educational architecture. Any data sources connected by the scraper worker must be used responsibly.
+
+Users are responsible for complying with the terms of service, robots.txt rules, rate limits, and applicable laws of any website or data source they connect. Do not use the Track Prices system to overload third-party services, bypass access controls, collect personal data, or perform unauthorized scraping.
+
+This project is not affiliated with, endorsed by, or sponsored by any marketplace, retailer, or e-commerce platform.
+
+## Features
+
+- NestJS API
+- TypeScript
+- Supabase client integration
+- Global validation pipe
+- Create scrape job endpoint
+- Read scrape job endpoint
+- Read results by scrape job endpoint
+- Query DTO validation
+- Central Supabase service
+- Separate modules for jobs and results
+
+## API Endpoints
+
+### Health / Root
+
+```http
+GET /
 ```
 
-## Run tests
+Returns the default service response.
 
-```bash
-# unit tests
-$ npm run test
+### Create Scrape Job
 
-# e2e tests
-$ npm run test:e2e
+```http
+POST /scrape-jobs
+Content-Type: application/json
 
-# test coverage
-$ npm run test:cov
+{
+  "query": "wireless headphones"
+}
 ```
 
-## Deployment
+Validation:
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+- `query` must be a string
+- minimum length: `2`
+- maximum length: `120`
+- whitespace is trimmed before validation
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+The endpoint inserts a pending job into Supabase:
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```ts
+{
+  query: dto.query,
+  status: "pending"
+}
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Read Scrape Job
 
-## Resources
+```http
+GET /scrape-jobs/:id
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+Returns the current job state from `scrape_jobs`.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+Possible statuses:
 
-## Support
+- `pending`
+- `processing`
+- `completed`
+- `failed`
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+### Read Results For A Job
 
-## Stay in touch
+```http
+GET /scrape-jobs/:id/results
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Returns normalized results from `scrape_results`, ordered by `position`.
+
+### Read Results By Query Parameter
+
+```http
+GET /scrape-results?jobId=<uuid>
+```
+
+Returns the same result set for a given job ID.
+
+## Supabase Contract
+
+The backend expects the same tables used by the scraper worker.
+
+### `scrape_jobs`
+
+Stores queue items and worker state.
+
+| Column | Purpose |
+| --- | --- |
+| `id` | Job ID |
+| `query` | Product search query |
+| `status` | `pending`, `processing`, `completed`, or `failed` |
+| `attempt_count` | Number of processing attempts |
+| `max_attempts` | Maximum retry count |
+| `worker_id` | Worker that claimed the job |
+| `locked_at` | Lock timestamp |
+| `started_at` | Processing start timestamp |
+| `completed_at` | Completion timestamp |
+| `last_error` | Last worker-level error |
+| `source_errors` | Per-adapter error details |
+| `created_at` | Creation timestamp |
+| `updated_at` | Update timestamp |
+
+### `scrape_results`
+
+Stores normalized product results written by the scraper worker.
+
+| Column | Purpose |
+| --- | --- |
+| `id` | Result ID |
+| `job_id` | Related scrape job |
+| `source` | Generic marketplace source |
+| `query` | Original product query |
+| `title` | Product title |
+| `price` | Product price |
+| `currency` | Currency code |
+| `product_url` | Product page URL |
+| `image_url` | Product image URL |
+| `rating` | Product rating |
+| `review_count` | Number of reviews |
+| `position` | Source result position |
+| `raw` | Adapter-specific raw payload |
+| `created_at` | Creation timestamp |
+
+## Project Structure
+
+```text
+src/
+  main.ts                         NestJS bootstrap
+  app.module.ts                   Root module
+  supabase/
+    supabase.module.ts            Supabase module
+    supabase.service.ts           Supabase client factory
+  scrape-jobs/
+    scrape-jobs.module.ts         Job module
+    scrape-jobs.controller.ts     Job endpoints
+    scrape-jobs.service.ts        Job persistence logic
+    dto/
+      create-scrape-job.dto.ts    Query validation DTO
+  scrape-results/
+    scrape-results.module.ts      Result module
+    scrape-results.controller.ts  Result endpoint
+    scrape-results.service.ts     Result read logic
+```
+
+## Environment Variables
+
+Create a local `.env` file:
+
+```env
+PORT=3000
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+Important: `SUPABASE_SERVICE_ROLE_KEY` must only be used in a trusted backend or worker environment. Never expose it in frontend code.
+
+## Installation
+
+```bash
+npm install
+```
+
+## Development
+
+```bash
+npm run start:dev
+```
+
+Default local URL:
+
+```text
+http://localhost:3000
+```
+
+## Scripts
+
+```bash
+npm run build
+npm run start
+npm run start:dev
+npm run start:prod
+npm run lint
+npm run test
+npm run test:e2e
+npm run test:cov
+```
+
+## Related Services
+
+Track Prices is split into three pieces:
+
+- `track-prices-ui`: frontend dashboard
+- `track-prices-backend`: API and Supabase orchestration layer
+- `trackprices-scraper`: background scraper worker
+
+The backend should be running before the UI starts creating search jobs. The scraper worker should be running for jobs to move from `pending` to `completed`.
+
+## Scalability Notes
+
+This backend is intentionally thin. It creates jobs and reads results, while scraping happens in a separate worker process.
+
+This keeps the architecture scalable because:
+
+- User-facing API requests are short-lived.
+- Scraping retries do not block HTTP requests.
+- Multiple scraper workers can consume the same job queue.
+- Marketplace-specific logic can live outside the backend.
+- Supabase acts as the persistence layer between services.
+
+Possible next steps:
+
+- Add authenticated users
+- Add per-user job ownership
+- Add cached search responses
+- Add product catalog endpoints
+- Add price history endpoints
+- Add watchlist and price alert APIs
+- Add rate limiting for public endpoints
+- Add observability for job and scraper health
+
+## Publishing Safety
+
+Before publishing this repository publicly:
+
+- Do not commit `.env` files.
+- Do not expose `SUPABASE_SERVICE_ROLE_KEY`.
+- Keep source names generic if publishing as an educational demo.
+- Do not include scraped datasets, cookies, sessions, tokens, or private logs.
+- Document that scraping is handled by a separate responsible-use worker.
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+This project is currently marked as `UNLICENSED` in `package.json`. Add a license before publishing publicly if you want others to reuse it.
+
